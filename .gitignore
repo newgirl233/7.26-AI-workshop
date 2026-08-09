@@ -1,0 +1,17 @@
+# 调试/临时文件
+_*.txt
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Node
+node_modules/
+
+# 编辑器/系统文件
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
