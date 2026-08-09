@@ -26,35 +26,46 @@
 
         <!-- 设置栏 -->
         <div class="settings-bar">
-          <button class="settings-btn" id="settingsBtn" aria-label="打开 API 设置">
-            &#x2699;&#xFE0F; 设置 API
-          </button>
-          <span class="api-status unconfigured" id="apiStatus">
-            <span class="status-dot">&#x25CF;</span> API 未配置
-          </span>
+          <div class="settings-left">
+            <div class="font-controls" role="group" aria-label="字号调节">
+              <button class="font-btn" id="fontSmallBtn" aria-label="减小字号">A−</button>
+              <button class="font-btn" id="fontLargeBtn" aria-label="增大字号">A+</button>
+            </div>
+            <button class="settings-btn" id="settingsBtn" aria-label="打开 API 和语音设置">
+              &#x2699;&#xFE0F; 设置
+            </button>
+          </div>
+          <div class="settings-right">
+            <button class="clear-btn" id="clearBtn" aria-label="清空对话">清空对话</button>
+            <span class="api-status unconfigured" id="apiStatus">
+              <span class="status-dot">&#x25CF;</span> API 未配置
+            </span>
+          </div>
         </div>
 
         <!-- 对话区域 -->
         <div class="conversation" id="conversation" role="log" aria-label="对话记录" aria-live="polite">
-          <div id="messageList">
-            <!-- 欢迎消息 -->
-            <div class="message assistant">
-              <div>
-                <div class="bubble">
-                  <p>你好！我是你的 AI 杭州导游 <strong>小杭</strong> 🎉</p>
-                  <p>我可以为你介绍杭州的美景、美食和文化。试试点击下面的快捷提问，或者点击麦克风按钮用语音问我吧！</p>
-                </div>
-                <div class="suggestions" id="welcomeSuggestions">
-                  <button class="suggestion-chip" data-question="介绍一下西湖">介绍一下西湖</button>
-                  <button class="suggestion-chip" data-question="杭州有哪些必去的景点？">杭州必去景点</button>
-                  <button class="suggestion-chip" data-question="杭州有什么特色美食？">杭州特色美食</button>
-                  <button class="suggestion-chip" data-question="西湖十景有哪些？">西湖十景</button>
-                  <button class="suggestion-chip" data-question="去灵隐寺怎么走？">灵隐寺交通</button>
-                </div>
+          <div id="messageList"></div>
+        </div>
+
+        <!-- 欢迎消息模板：初始化和清空对话时插入 -->
+        <template id="welcomeTemplate">
+          <div class="message assistant">
+            <div>
+              <div class="bubble">
+                <p>你好！我是你的 AI 杭州导游 <strong>小杭</strong> 🎉</p>
+                <p>我可以为你介绍杭州的美景、美食和文化。试试点击下面的快捷提问，或者点击麦克风按钮用语音问我吧！</p>
+              </div>
+              <div class="suggestions">
+                <button class="suggestion-chip" data-question="介绍一下西湖">介绍一下西湖</button>
+                <button class="suggestion-chip" data-question="杭州有哪些必去的景点？">杭州必去景点</button>
+                <button class="suggestion-chip" data-question="杭州有什么特色美食？">杭州特色美食</button>
+                <button class="suggestion-chip" data-question="西湖十景有哪些？">西湖十景</button>
+                <button class="suggestion-chip" data-question="去灵隐寺怎么走？">灵隐寺交通</button>
               </div>
             </div>
           </div>
-        </div>
+        </template>
 
         <!-- 文字输入 -->
         <div class="input-bar">
@@ -71,16 +82,16 @@
               <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
             </svg>
           </button>
-          <p class="status-text" id="statusText">点击麦克风开始语音对话，或在下方输入文字</p>
+          <p class="status-text" id="statusText" aria-live="polite">点击麦克风开始语音对话，或在下方输入文字</p>
         </div>
 
       </div>
     </section>
 
     <!-- ==================== 设置弹窗 ==================== -->
-    <div class="modal-overlay" id="modalOverlay" role="dialog" aria-modal="true" aria-label="API 设置">
+    <div class="modal-overlay" id="modalOverlay" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
       <div class="modal">
-        <h2>&#x2699;&#xFE0F; API 设置</h2>
+        <h2 id="settingsTitle">&#x2699;&#xFE0F; 设置</h2>
 
         <form id="settingsForm">
           <div class="form-group">
@@ -108,6 +119,32 @@
             <label for="inputProxy">本地代理地址（可选）</label>
             <input type="url" id="inputProxy" placeholder="http://localhost:8080/api/chat" autocomplete="off">
             <p class="form-hint">留空则直连 API；若浏览器报 CORS 错误，运行 server.py 后填写此地址</p>
+          </div>
+
+          <hr class="form-divider">
+
+          <div class="form-group">
+            <label for="inputRate">语速 <span class="range-value" id="inputRateValue">1.0x</span></label>
+            <input type="range" id="inputRate" min="0.5" max="2" step="0.1" value="1">
+          </div>
+
+          <div class="form-group">
+            <label for="inputVolume">音量 <span class="range-value" id="inputVolumeValue">100%</span></label>
+            <input type="range" id="inputVolume" min="0" max="1" step="0.05" value="1">
+          </div>
+
+          <div class="form-group">
+            <label for="inputVoice">音色</label>
+            <select id="inputVoice"></select>
+            <button type="button" class="btn-secondary voice-test-btn" id="testVoiceBtn">试听语音</button>
+          </div>
+
+          <div class="form-group checkbox-group">
+            <label><input type="checkbox" id="inputSound" checked> 播放操作提示音</label>
+          </div>
+
+          <div class="form-group checkbox-group">
+            <label><input type="checkbox" id="inputPersist" checked> 刷新后保留对话记录</label>
           </div>
 
           <div class="test-result" id="testResult"></div>
@@ -176,8 +213,8 @@
       <!-- ④ GitHub 网址 -->
       <article class="info-card">
         <h3>④ GitHub 网址</h3>
-        <a href="#" class="github-link" target="_blank" rel="noopener noreferrer">
-          &#x1F4F7; GitHub 仓库链接（待补充）
+        <a href="https://github.com/newgirl233/7.26-AI-workshop" class="github-link" target="_blank" rel="noopener noreferrer">
+          &#x1F4F7; GitHub 仓库
         </a>
       </article>
 
@@ -191,6 +228,7 @@
   </footer>
 
   <!-- ==================== JavaScript ==================== -->
+  <script src="js/prefs.js"></script>
   <script src="js/speech.js"></script>
   <script src="js/api.js"></script>
   <script src="js/app.js"></script>

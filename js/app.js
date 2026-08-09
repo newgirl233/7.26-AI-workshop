@@ -31,7 +31,9 @@ const elements = {
   testResult: $('#testResult'),
   textInput: $('#textInput'),
   sendBtn: $('#sendBtn'),
-  welcomeSuggestions: $('#welcomeSuggestions'),
+  fontSmallBtn: $('#fontSmallBtn'),
+  fontLargeBtn: $('#fontLargeBtn'),
+  clearBtn: $('#clearBtn'),
 };
 
 // ======================== 工具函数 ========================
@@ -100,6 +102,7 @@ function rollbackLastUserMessage() {
   const userMessages = elements.messageList.querySelectorAll('.message.user');
   const last = userMessages[userMessages.length - 1];
   if (last) last.remove();
+  persistConversation();
   scrollToBottom();
 }
 
@@ -158,6 +161,102 @@ function updateApiStatus() {
   }
 }
 
+// ======================== 字号调节 ========================
+
+function applyFontSize() {
+  const size = Math.min(130, Math.max(90, Prefs.get().fontSize || 100));
+  document.documentElement.style.fontSize = `${size}%`;
+}
+
+function changeFontSize(delta) {
+  const next = Math.min(130, Math.max(90, (Prefs.get().fontSize || 100) + delta));
+  Prefs.save({ fontSize: next });
+  applyFontSize();
+}
+
+// ======================== 声音反馈 ========================
+
+const SoundFeedback = {
+  ctx: null,
+
+  play(type) {
+    if (!Prefs.get().soundEnabled) return;
+    try {
+      this.ctx = this.ctx || new (window.AudioContext || window.webkitAudioContext)();
+      const ctx = this.ctx;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      const config = {
+        listening: { freq: 880, dur: 0.08 },
+        success: { freq: 1318, dur: 0.12 },
+        error: { freq: 220, dur: 0.25 },
+      }[type] || { freq: 660, dur: 0.1 };
+
+      osc.type = 'sine';
+      osc.frequency.value = config.freq;
+      gain.gain.setValueAtTime(0.12, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + config.dur);
+      osc.start();
+      osc.stop(ctx.currentTime + config.dur);
+
+      if (type === 'listening' && navigator.vibrate) {
+        navigator.vibrate(60);
+      }
+    } catch (e) {
+      // 忽略音频错误
+    }
+  },
+};
+
+// ======================== 对话持久化 ========================
+
+/**
+ * 重置对话区：清空消息，插入欢迎消息模板
+ */
+function resetConversation() {
+  state.conversation = [];
+  elements.messageList.innerHTML = '';
+  const template = document.getElementById('welcomeTemplate');
+  if (template) elements.messageList.appendChild(template.content.cloneNode(true));
+  scrollToBottom();
+}
+
+/**
+ * 把当前对话保存到 localStorage（仅保留最近 50 条）
+ */
+function persistConversation() {
+  if (!Prefs.get().persistConversation) return;
+  try {
+    localStorage.setItem('hangzhou_tour_conversation', JSON.stringify(state.conversation.slice(-50)));
+  } catch (e) {
+    // 忽略保存错误
+  }
+}
+
+/**
+ * 页面加载时恢复上次的对话记录
+ */
+function renderSavedConversation() {
+  resetConversation();
+  if (!Prefs.get().persistConversation) return;
+  try {
+    const saved = JSON.parse(localStorage.getItem('hangzhou_tour_conversation') || '[]');
+    if (Array.isArray(saved)) {
+      state.conversation = saved.slice(-50);
+      state.conversation.forEach((msg) => {
+        if (msg && msg.role && msg.content) {
+          appendMessage(msg.role, msg.content);
+        }
+      });
+    }
+  } catch (e) {
+    state.conversation = [];
+  }
+}
+
 // ======================== 对话流程 ========================
 
 /**
@@ -180,6 +279,7 @@ async function handleUserInput(text) {
   // 追加用户消息
   state.conversation.push({ role: 'user', content: text });
   appendMessage('user', text);
+  persistConversation();
 
   // 显示输入指示器
   updateMicButton('processing');
@@ -194,6 +294,8 @@ async function handleUserInput(text) {
     removeTypingIndicator();
     state.conversation.push({ role: 'assistant', content: reply });
     appendMessage('assistant', reply);
+    persistConversation();
+    SoundFeedback.play('success');
 
     // 语音播报
     updateMicButton('speaking');
@@ -218,6 +320,7 @@ async function handleUserInput(text) {
 
     if (mySeq !== requestSeq) return; // 旧请求的错误不影响当前会话
     appendMessage('assistant', `[抱歉，出了点问题] ${err.message}`);
+    SoundFeedback.play('error');
     updateMicButton('idle');
     console.error('API Error:', err);
   }
@@ -230,8 +333,10 @@ function startListening() {
   try {
     SpeechManager.start();
     updateMicButton('listening');
+    SoundFeedback.play('listening');
   } catch (err) {
     appendMessage('assistant', `[错误] ${err.message}`);
+    SoundFeedback.play('error');
   }
 }
 
@@ -283,7 +388,7 @@ elements.textInput.addEventListener('keydown', (e) => {
 });
 
 // 快捷提问
-elements.welcomeSuggestions.addEventListener('click', (e) => {
+elements.messageList.addEventListener('click', (e) => {
   const chip = e.target.closest('.suggestion-chip');
   if (chip) {
     const question = chip.dataset.question;
@@ -293,14 +398,37 @@ elements.welcomeSuggestions.addEventListener('click', (e) => {
   }
 });
 
+// 字号调节
+elements.fontSmallBtn.addEventListener('click', () => changeFontSize(-10));
+elements.fontLargeBtn.addEventListener('click', () => changeFontSize(10));
+
+// 清空对话
+elements.clearBtn.addEventListener('click', () => {
+  resetConversation();
+  try {
+    localStorage.removeItem('hangzhou_tour_conversation');
+  } catch (e) {
+    // 忽略清除错误
+  }
+  elements.statusText.textContent = '对话已清空，可以开始新提问';
+});
+
 // ======================== 语音回调绑定 ========================
 
 SpeechManager.onResult = (text) => {
   handleUserInput(text);
 };
 
+// 识别过程中的中间结果：实时显示在状态区
+SpeechManager.onInterim = (text) => {
+  if (state.status === 'listening') {
+    elements.statusText.textContent = `🎤 正在聆听：${text}`;
+  }
+};
+
 SpeechManager.onError = (error) => {
   appendMessage('assistant', `[语音识别错误] ${error}，请尝试在下方输入文字。`);
+  SoundFeedback.play('error');
   updateMicButton('idle');
 };
 
@@ -318,26 +446,126 @@ SpeechManager.loadVoices();
 
 // ======================== 设置面板 ========================
 
-// 打开设置
-elements.settingsBtn.addEventListener('click', () => {
+let lastFocusedElement = null;
+
+/**
+ * 把系统音色列表填充到"音色"下拉框
+ */
+function populateVoiceSelect() {
+  const select = $('#inputVoice');
+  if (!select) return;
+  const voices = window.speechSynthesis.getVoices();
+  const current = select.value || Prefs.get().voiceURI;
+  select.innerHTML = '<option value="">自动（推荐）</option>';
+  voices.forEach((v) => {
+    const opt = document.createElement('option');
+    opt.value = v.voiceURI;
+    opt.textContent = `${v.name} (${v.lang})`;
+    select.appendChild(opt);
+  });
+  select.value = voices.some(v => v.voiceURI === current) ? current : '';
+}
+
+/**
+ * 打开设置弹窗：填入当前配置，记住焦点来源
+ */
+function openSettings() {
+  lastFocusedElement = document.activeElement;
+
   const config = getConfig();
   $('#inputApiKey').value = config.apiKey === 'YOUR_API_KEY_HERE' ? '' : config.apiKey;
   $('#inputEndpoint').value = config.endpoint;
   $('#inputModel').value = config.model;
   $('#inputProxy').value = config.proxy || '';
+
+  const prefs = Prefs.get();
+  $('#inputRate').value = prefs.speechRate;
+  $('#inputRateValue').textContent = `${Number(prefs.speechRate).toFixed(1)}x`;
+  $('#inputVolume').value = prefs.speechVolume;
+  $('#inputVolumeValue').textContent = `${Math.round(Number(prefs.speechVolume) * 100)}%`;
+  $('#inputSound').checked = prefs.soundEnabled;
+  $('#inputPersist').checked = prefs.persistConversation;
+  populateVoiceSelect();
+
   elements.testResult.style.display = 'none';
   elements.modalOverlay.classList.add('open');
-});
+  $('#inputApiKey').focus();
+}
+
+/**
+ * 关闭设置弹窗：恢复焦点到打开前的元素
+ */
+function closeSettings() {
+  elements.modalOverlay.classList.remove('open');
+  if (lastFocusedElement && typeof lastFocusedElement.focus === 'function') {
+    lastFocusedElement.focus();
+  }
+}
+
+// 打开设置
+elements.settingsBtn.addEventListener('click', openSettings);
 
 // 关闭设置
-$('#closeSettings').addEventListener('click', () => {
-  elements.modalOverlay.classList.remove('open');
-});
+$('#closeSettings').addEventListener('click', closeSettings);
 
 elements.modalOverlay.addEventListener('click', (e) => {
   if (e.target === elements.modalOverlay) {
-    elements.modalOverlay.classList.remove('open');
+    closeSettings();
   }
+});
+
+// 弹窗无障碍：Escape 关闭 + Tab 焦点锁定
+document.addEventListener('keydown', (e) => {
+  if (!elements.modalOverlay.classList.contains('open')) return;
+
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    closeSettings();
+    return;
+  }
+
+  if (e.key === 'Tab') {
+    const focusables = [...elements.modalOverlay.querySelectorAll(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    )].filter((el) => !el.disabled && el.offsetParent !== null);
+    if (focusables.length === 0) return;
+
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+});
+
+// 语速/音量滑杆实时显示数值
+$('#inputRate').addEventListener('input', () => {
+  $('#inputRateValue').textContent = `${Number($('#inputRate').value).toFixed(1)}x`;
+});
+
+$('#inputVolume').addEventListener('input', () => {
+  $('#inputVolumeValue').textContent = `${Math.round(Number($('#inputVolume').value) * 100)}%`;
+});
+
+// 试听当前语音设置
+$('#testVoiceBtn').addEventListener('click', () => {
+  const rate = Number($('#inputRate').value) || 1;
+  const volume = Number($('#inputVolume').value) || 1;
+  const voiceURI = $('#inputVoice').value;
+
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance('你好，我是 AI 杭州导游小杭，这是当前语音设置的试听效果。');
+  utterance.lang = 'zh-CN';
+  utterance.rate = rate;
+  utterance.volume = volume;
+  const voices = window.speechSynthesis.getVoices();
+  const voice = voices.find(v => v.voiceURI === voiceURI) || voices.find(v => v.lang.startsWith('zh'));
+  if (voice) utterance.voice = voice;
+  window.speechSynthesis.speak(utterance);
 });
 
 // 保存设置
@@ -349,9 +577,16 @@ elements.settingsForm.addEventListener('submit', (e) => {
     model: $('#inputModel').value.trim(),
     proxy: $('#inputProxy').value.trim(),
   });
+  Prefs.save({
+    speechRate: Number($('#inputRate').value) || 1,
+    speechVolume: Number($('#inputVolume').value) || 1,
+    voiceURI: $('#inputVoice').value,
+    soundEnabled: $('#inputSound').checked,
+    persistConversation: $('#inputPersist').checked,
+  });
   updateApiStatus();
-  elements.modalOverlay.classList.remove('open');
-  appendMessage('assistant', '✅ API 配置已保存！现在你可以开始提问了。');
+  closeSettings();
+  appendMessage('assistant', '✅ 设置已保存！现在你可以开始提问了。');
 });
 
 // 测试连接
@@ -397,8 +632,15 @@ elements.testBtn.addEventListener('click', async () => {
 // ======================== 初始化 ========================
 
 function init() {
+  Prefs.load();
+  applyFontSize();
+  populateVoiceSelect();
+  // Chrome 语音列表异步加载，加载完成后刷新下拉框
+  window.speechSynthesis.addEventListener?.('voiceschanged', populateVoiceSelect);
+
   updateApiStatus();
   updateMicButton('idle');
+  renderSavedConversation();
   console.log('AI 杭州导游已启动！🎉');
   console.log('提示：请先点击"设置 API"配置 API Key。');
 }

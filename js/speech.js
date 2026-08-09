@@ -8,6 +8,7 @@ const SpeechManager = {
   isListening: false,
   hasResult: false,
   onResult: null,     // callback: (text) => void
+  onInterim: null,    // callback: (text) => void  识别过程中的中间结果
   onError: null,      // callback: (error) => void
   onNoSpeech: null,   // callback: () => void  (用户点击后未说话)
   onStart: null,      // callback: () => void
@@ -24,7 +25,7 @@ const SpeechManager = {
     this.recognition = new SpeechRecognition();
     this.recognition.lang = 'zh-CN';
     this.recognition.continuous = false;
-    this.recognition.interimResults = false;
+    this.recognition.interimResults = true;
     this.recognition.maxAlternatives = 1;
 
     this.recognition.onstart = () => {
@@ -34,11 +35,24 @@ const SpeechManager = {
     };
 
     this.recognition.onresult = (e) => {
-      this.hasResult = true;
-      this.isListening = false;
-      const transcript = e.results[0][0].transcript.trim();
-      if (transcript) {
-        this.onResult?.(transcript);
+      let finalText = '';
+      let interimText = '';
+      for (let i = 0; i < e.results.length; i++) {
+        const result = e.results[i];
+        const transcript = result[0].transcript;
+        if (result.isFinal) {
+          finalText += transcript;
+        } else {
+          interimText += transcript;
+        }
+      }
+
+      if (finalText.trim()) {
+        this.hasResult = true;
+        this.isListening = false;
+        this.onResult?.(finalText.trim());
+      } else if (interimText.trim()) {
+        this.onInterim?.(interimText.trim());
       }
     };
 
@@ -97,15 +111,17 @@ const SpeechManager = {
       // 取消正在进行的朗读
       window.speechSynthesis.cancel();
 
+      const prefs = Prefs.get();
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = 'zh-CN';
-      utterance.rate = 1.0;
-      utterance.pitch = 1.0;
+      utterance.rate = prefs.speechRate || 1.0;
+      utterance.volume = prefs.speechVolume ?? 1.0;
 
-      // 选择中文语音
+      // 选择用户指定的音色；未指定时自动选择中文语音
       const voices = window.speechSynthesis.getVoices();
-      const zhVoice = voices.find(v => v.lang.startsWith('zh'));
-      if (zhVoice) utterance.voice = zhVoice;
+      const voice = voices.find(v => v.voiceURI === prefs.voiceURI)
+                 || voices.find(v => v.lang.startsWith('zh'));
+      if (voice) utterance.voice = voice;
 
       utterance.onend = resolve;
       utterance.onerror = () => resolve(); // 出错也继续
